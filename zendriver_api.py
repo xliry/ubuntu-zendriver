@@ -40,9 +40,6 @@ CORS(app)
 
 logger = logging.getLogger(__name__)
 
-# Global session store to keep sessions alive
-active_sessions = {}
-
 # Global project store to map user_id to project_id
 user_projects = {}
 
@@ -865,21 +862,12 @@ async def process_zendriver_job(job_data):
     
     session = None
     try:
-        # Check if session already exists for this user  
-        if user_id in active_sessions:
-            session = active_sessions[user_id]
-            logger.info(f"Reusing existing session for user {user_id}")
-            
-            # Skip login for existing sessions - assume already logged in
-            logger.info(f"Skipping login check for existing session - assuming logged in")
-        else:
-            logger.info(f"Creating new session for user {user_id}")
-            session = ZendriverSession(job_id, user_id)
-            if not await session.create_session():
-                raise Exception("Failed to create Zendriver session")
-            # Store session for reuse
-            active_sessions[user_id] = session
-            logger.info(f"Created and stored new session for user {user_id}")
+        # Create new session for each request (cookies handle login state)
+        logger.info(f"Creating new session for user {user_id}")
+        session = ZendriverSession(job_id, user_id)
+        if not await session.create_session():
+            raise Exception("Failed to create Zendriver session")
+        logger.info(f"Created and stored new session for user {user_id}")
         
         # Get credentials
         credentials = session.session_manager.get_current_credentials()
@@ -892,13 +880,10 @@ async def process_zendriver_job(job_data):
         if not email or not password:
             raise Exception("Invalid credentials")
         
-        # Smart login only for new sessions
-        if user_id not in active_sessions:
-            logger.info("New session - performing login")
-            if not await session.smart_login(email, password):
-                raise Exception("Login failed")
-        else:
-            logger.info("Existing session - skipping login process")
+        # Smart login (will check cookies first)
+        logger.info("Starting smart login process...")
+        if not await session.smart_login(email, password):
+            raise Exception("Login failed")
         
         # Check if user has an existing project
         if user_id in user_projects:
@@ -956,10 +941,14 @@ async def process_zendriver_job(job_data):
         send_callback(callback_url, job_id, "failed", error=str(e))
         raise e
     finally:
-        # Keep session alive for next prompts
+        # Close session after callback - cookies will handle login state
         if session:
-            logger.info(f"Session kept alive for user {user_id} - ready for next prompts")
-            # Session remains in active_sessions for reuse
+            logger.info(f"Closing session for user {user_id} - cookies will handle next login")
+            try:
+                await session.close_session()
+                logger.info(f"Session closed for user {user_id}")
+            except Exception as close_error:
+                logger.error(f"Error closing session for user {user_id}: {close_error}")
 
 @app.route('/api/v1/automation/google-flow', methods=['POST'])
 def google_flow_automation():
@@ -1108,19 +1097,12 @@ def serve_video(filename):
 
 @app.route('/api/v1/sessions/status', methods=['GET'])
 def get_active_sessions():
-    """Get status of all active sessions"""
+    """Get status of user projects (sessions are no longer kept alive)"""
     try:
-        session_info = {}
-        for user_id, session in active_sessions.items():
-            session_info[user_id] = {
-                "job_id": session.job_id,
-                "status": session.status,
-                "project_id": user_projects.get(user_id, "no_project")
-            }
         return jsonify({
-            "active_sessions": session_info,
-            "total_sessions": len(active_sessions),
-            "user_projects": user_projects
+            "message": "Sessions are no longer kept alive - each request creates fresh session",
+            "user_projects": user_projects,
+            "total_projects": len(user_projects)
         })
     except Exception as e:
         logger.error(f"Error getting session status: {e}")
