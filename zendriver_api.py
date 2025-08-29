@@ -322,51 +322,6 @@ class ZendriverSession:
             logger.error(f"Screenshot error: {e}")
             return None
     
-    async def is_session_valid(self):
-        """Check if current session is still valid"""
-        try:
-            if not self.browser or not self.page:
-                self.logger.warning("Browser or page is None")
-                return False
-            
-            # Try to execute a simple command to check if browser is responsive
-            try:
-                # Add timeout to prevent hanging
-                await asyncio.wait_for(self.page.evaluate("document.title"), timeout=5.0)
-                self.logger.info("Browser is responsive")
-            except asyncio.TimeoutError:
-                self.logger.warning("Browser responsiveness check timed out")
-                return False
-            except Exception as e:
-                self.logger.warning(f"Browser is not responsive: {e}")
-                return False
-            
-            # Check if we're still logged in by checking current URL
-            try:
-                current_url = await asyncio.wait_for(
-                    self.page.evaluate("window.location.href"), 
-                    timeout=5.0
-                )
-                self.logger.info(f"Current URL: {current_url}")
-                
-                # If redirected to login page, session expired
-                if "accounts.google.com/signin" in current_url:
-                    self.logger.warning("Redirected to login page - session expired")
-                    return False
-                    
-            except asyncio.TimeoutError:
-                self.logger.warning("URL check timed out")
-                return False
-            except Exception as e:
-                self.logger.warning(f"URL check failed: {e}")
-                return False
-                
-            self.logger.info("Session validation passed")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Session validation failed: {e}")
-            return False
 
     async def is_logged_in(self):
         """Check if user is still logged in to Google via cookies"""
@@ -407,29 +362,6 @@ class ZendriverSession:
             self.logger.error(f"Smart login failed: {e}")
             return False
 
-    async def recover_session(self):
-        """Try to recover a broken session"""
-        try:
-            self.logger.info("Attempting session recovery...")
-            
-            # Check if just logged out
-            if not await self.is_logged_in():
-                self.logger.info("User logged out, attempting re-login...")
-                credentials = self.session_manager.get_current_credentials()
-                if not credentials:
-                    self.logger.error("No credentials available for recovery")
-                    return False
-                    
-                return await self.login_with_credentials(
-                    credentials['email'], credentials['password']
-                )
-            else:
-                self.logger.info("User still logged in, session recovered")
-                return True
-                
-        except Exception as e:
-            self.logger.error(f"Session recovery failed: {e}")
-            return False
 
     async def validate_project_access(self, project_id):
         """Check if project is still accessible"""
@@ -897,80 +829,6 @@ def retry_on_failure(max_retries=3, delay=2):
         return wrapper
     return decorator
 
-async def cleanup_session(user_id):
-    """Clean up a specific session"""
-    try:
-        if user_id in active_sessions:
-            session = active_sessions[user_id]
-            await session.close_session()
-            del active_sessions[user_id]
-            logger.info(f"Session cleaned up for user {user_id}")
-            
-        # Also remove user's project mapping
-        if user_id in user_projects:
-            del user_projects[user_id]
-            logger.info(f"Project mapping removed for user {user_id}")
-            
-    except Exception as e:
-        logger.error(f"Error cleaning up session for user {user_id}: {e}")
-
-async def cleanup_old_sessions():
-    """Clean up old or invalid sessions"""
-    try:
-        logger.info("Starting session cleanup...")
-        
-        # Check if we have too many sessions
-        if len(active_sessions) > MAX_SESSIONS:
-            logger.warning(f"Too many sessions ({len(active_sessions)}), cleaning up oldest sessions")
-            
-        sessions_to_remove = []
-        
-        for user_id, session in active_sessions.items():
-            try:
-                # Check if session is still valid
-                if not await session.is_session_valid():
-                    sessions_to_remove.append(user_id)
-                    logger.info(f"Marked invalid session for cleanup: {user_id}")
-                    
-            except Exception as e:
-                logger.error(f"Error checking session validity for {user_id}: {e}")
-                sessions_to_remove.append(user_id)
-                
-        # Remove invalid sessions
-        for user_id in sessions_to_remove:
-            await cleanup_session(user_id)
-            
-        logger.info(f"Session cleanup completed. Removed {len(sessions_to_remove)} sessions")
-        logger.info(f"Active sessions remaining: {len(active_sessions)}")
-        
-    except Exception as e:
-        logger.error(f"Error during session cleanup: {e}")
-
-async def session_health_check():
-    """Periodic health check for all sessions"""
-    try:
-        logger.info("Running session health check...")
-        
-        healthy_sessions = 0
-        unhealthy_sessions = 0
-        
-        for user_id, session in list(active_sessions.items()):
-            try:
-                if await session.is_session_valid():
-                    healthy_sessions += 1
-                else:
-                    unhealthy_sessions += 1
-                    await cleanup_session(user_id)
-                    
-            except Exception as e:
-                logger.error(f"Health check failed for session {user_id}: {e}")
-                unhealthy_sessions += 1
-                await cleanup_session(user_id)
-                
-        logger.info(f"Health check completed: {healthy_sessions} healthy, {unhealthy_sessions} unhealthy sessions")
-        
-    except Exception as e:
-        logger.error(f"Error during health check: {e}")
 
 async def process_zendriver_job(job_data):
     """Process Zendriver job - Google Flow automation"""
@@ -984,47 +842,11 @@ async def process_zendriver_job(job_data):
     
     session = None
     try:
-        # Check if session already exists for this user
+        # Check if session already exists for this user  
         if user_id in active_sessions:
             session = active_sessions[user_id]
-            logger.info(f"Found existing session for user {user_id}")
-            
-            # Validate existing session
-            try:
-                session_valid = await session.is_session_valid()
-                logger.info(f"Session validation result for user {user_id}: {session_valid}")
-                
-                if session_valid:
-                    logger.info(f"Existing session is valid for user {user_id}")
-                    # If browser is on a different page, navigate back to Flow
-                    current_url = await session.page.evaluate("window.location.href")
-                    if "labs.google/fx/tools/flow" not in current_url:
-                        logger.info(f"Browser not on Flow page ({current_url}), navigating...")
-                        await session.navigate_to_flow()
-                else:
-                    logger.warning(f"Session validation failed for user {user_id}")
-            except Exception as e:
-                logger.error(f"Session validation error for user {user_id}: {e}")
-                session_valid = False
-            
-            if not session_valid:
-                logger.warning(f"Existing session is invalid for user {user_id}, attempting recovery...")
-                
-                # Try to recover the session
-                if await session.recover_session():
-                    logger.info(f"Session recovered successfully for user {user_id}")
-                else:
-                    logger.warning(f"Session recovery failed for user {user_id}, creating new session...")
-                    
-                    # Close the old session and remove from active sessions
-                    await session.close_session()
-                    del active_sessions[user_id]
-                    
-                    # Force creation of new session
-                    session = None
-        
-        # Create new session if none exists or old session couldn't be recovered
-        if session is None:
+            logger.info(f"Reusing existing session for user {user_id}")
+        else:
             logger.info(f"Creating new session for user {user_id}")
             session = ZendriverSession(job_id, user_id)
             if not await session.create_session():
@@ -1254,16 +1076,6 @@ def serve_video(filename):
         logger.error(f"Error serving video {filename}: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
-@app.route('/api/v1/sessions/close/<user_id>', methods=['POST'])
-async def close_user_session(user_id):
-    """Close session for a specific user"""
-    try:
-        await cleanup_session(user_id)
-        return jsonify({"status": "success", "message": f"Session closed for user {user_id}"})
-    except Exception as e:
-        logger.error(f"Error closing session for user {user_id}: {e}")
-        return jsonify({"error": str(e)}), 500
-
 @app.route('/api/v1/sessions/status', methods=['GET'])
 def get_active_sessions():
     """Get status of all active sessions"""
@@ -1273,7 +1085,6 @@ def get_active_sessions():
             session_info[user_id] = {
                 "job_id": session.job_id,
                 "status": session.status,
-                "created_at": getattr(session, 'created_at', 'unknown'),
                 "project_id": user_projects.get(user_id, "no_project")
             }
         return jsonify({
@@ -1283,34 +1094,6 @@ def get_active_sessions():
         })
     except Exception as e:
         logger.error(f"Error getting session status: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/v1/sessions/cleanup', methods=['POST'])
-async def cleanup_sessions():
-    """Manually trigger session cleanup"""
-    try:
-        await cleanup_old_sessions()
-        return jsonify({
-            "status": "success", 
-            "message": "Session cleanup completed",
-            "remaining_sessions": len(active_sessions)
-        })
-    except Exception as e:
-        logger.error(f"Error during manual cleanup: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/v1/sessions/health', methods=['GET'])
-async def health_check_sessions():
-    """Run health check on all sessions"""
-    try:
-        await session_health_check()
-        return jsonify({
-            "status": "success",
-            "message": "Health check completed",
-            "active_sessions": len(active_sessions)
-        })
-    except Exception as e:
-        logger.error(f"Error during health check: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
