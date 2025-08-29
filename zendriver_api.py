@@ -961,6 +961,11 @@ async def process_zendriver_job(job_data):
                 
                 if session_valid:
                     logger.info(f"Existing session is valid for user {user_id}")
+                    # If browser is on a different page, navigate back to Flow
+                    current_url = await session.page.evaluate("window.location.href")
+                    if "labs.google/fx/tools/flow" not in current_url:
+                        logger.info(f"Browser not on Flow page ({current_url}), navigating...")
+                        await session.navigate_to_flow()
                 else:
                     logger.warning(f"Session validation failed for user {user_id}")
             except Exception as e:
@@ -1013,17 +1018,25 @@ async def process_zendriver_job(job_data):
             project_id = user_projects[user_id]
             logger.info(f"User {user_id} has existing project: {project_id}")
             
-            # Validate project access
-            if await session.validate_project_access(project_id):
-                logger.info(f"Project {project_id} is accessible for user {user_id}")
+            # Check if we're already on the correct project page
+            current_url = await session.page.evaluate("window.location.href")
+            logger.info(f"Current browser URL: {current_url}")
+            
+            if project_id in current_url:
+                logger.info(f"Already on project page {project_id} - skipping navigation")
             else:
-                logger.warning(f"Project {project_id} is not accessible, creating new project")
-                # If project is not accessible, create new project
-                project_id = await session.create_new_project()
-                if not project_id:
-                    raise Exception("Failed to create new project")
-                user_projects[user_id] = project_id
-                logger.info(f"Created new project for user {user_id}: {project_id}")
+                logger.info(f"Not on project page, validating access to {project_id}")
+                # Validate project access
+                if await session.validate_project_access(project_id):
+                    logger.info(f"Project {project_id} is accessible for user {user_id}")
+                else:
+                    logger.warning(f"Project {project_id} is not accessible, creating new project")
+                    # If project is not accessible, create new project
+                    project_id = await session.create_new_project()
+                    if not project_id:
+                        raise Exception("Failed to create new project")
+                    user_projects[user_id] = project_id
+                    logger.info(f"Created new project for user {user_id}: {project_id}")
         else:
             # Create new project for first time user
             logger.info(f"Creating new project for user {user_id}")
