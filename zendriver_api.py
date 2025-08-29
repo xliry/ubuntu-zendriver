@@ -869,6 +869,9 @@ async def process_zendriver_job(job_data):
         if user_id in active_sessions:
             session = active_sessions[user_id]
             logger.info(f"Reusing existing session for user {user_id}")
+            
+            # Skip login for existing sessions - assume already logged in
+            logger.info(f"Skipping login check for existing session - assuming logged in")
         else:
             logger.info(f"Creating new session for user {user_id}")
             session = ZendriverSession(job_id, user_id)
@@ -889,9 +892,13 @@ async def process_zendriver_job(job_data):
         if not email or not password:
             raise Exception("Invalid credentials")
         
-        # Smart login (check cookies first)
-        if not await session.smart_login(email, password):
-            raise Exception("Login failed")
+        # Smart login only for new sessions
+        if user_id not in active_sessions:
+            logger.info("New session - performing login")
+            if not await session.smart_login(email, password):
+                raise Exception("Login failed")
+        else:
+            logger.info("Existing session - skipping login process")
         
         # Check if user has an existing project
         if user_id in user_projects:
