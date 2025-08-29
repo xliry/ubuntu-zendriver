@@ -340,18 +340,24 @@ class ZendriverSession:
         """Check if user is still logged in to Google via cookies"""
         try:
             self.logger.info("Checking login status via cookies...")
-            await self.page.get("https://myaccount.google.com")
-            await asyncio.sleep(3)
+            
+            # Try to access a protected Google service that requires login
+            await self.page.get("https://accounts.google.com/ManageAccount")
+            await asyncio.sleep(4)
             
             current_url = await self.page.evaluate("window.location.href")
-            is_logged_in = "myaccount.google.com" in current_url
+            self.logger.info(f"Cookie check result URL: {current_url}")
             
-            if is_logged_in:
+            # If we're redirected to signin, we're not logged in
+            if "accounts.google.com/signin" in current_url or "accounts.google.com/v3/signin" in current_url:
+                self.logger.info("Redirected to signin - not logged in")
+                return False
+            elif "myaccount.google.com" in current_url or "accounts.google.com/ManageAccount" in current_url:
                 self.logger.info("User is logged in via saved cookies!")
+                return True
             else:
-                self.logger.warning(f"User not logged in, current URL: {current_url}")
-                
-            return is_logged_in
+                self.logger.warning(f"Unexpected URL during cookie check: {current_url}")
+                return False
             
         except Exception as e:
             self.logger.error(f"Login check failed: {e}")
