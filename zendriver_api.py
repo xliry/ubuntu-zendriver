@@ -73,9 +73,8 @@ class ZendriverSession:
             # Ensure shared profile directory exists
             os.makedirs(SHARED_PROFILE_DIR, exist_ok=True)
             
-            # Chrome options with persistent profile (no guest mode)
+            # Chrome options (user-data-dir handled by zendriver parameter)
             chrome_args = [
-                f"--user-data-dir={SHARED_PROFILE_DIR}",
                 "--no-first-run",
                 "--no-service-autorun", 
                 "--no-default-browser-check",
@@ -95,7 +94,11 @@ class ZendriverSession:
                 "--disable-features=ProfilePicker"  # Skip profile picker
             ]
             
-            self.browser = await zd.start(arguments=chrome_args)
+            # Create zendriver config with persistent profile
+            self.browser = await zd.start(
+                user_data_dir=SHARED_PROFILE_DIR,
+                browser_args=chrome_args
+            )
             self.page = await self.browser.get("https://accounts.google.com")
             
             # Apply stealth scripts
