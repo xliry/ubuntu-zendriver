@@ -955,9 +955,19 @@ async def process_zendriver_job(job_data):
             logger.info(f"Found existing session for user {user_id}")
             
             # Validate existing session
-            if await session.is_session_valid():
-                logger.info(f"Existing session is valid for user {user_id}")
-            else:
+            try:
+                session_valid = await session.is_session_valid()
+                logger.info(f"Session validation result for user {user_id}: {session_valid}")
+                
+                if session_valid:
+                    logger.info(f"Existing session is valid for user {user_id}")
+                else:
+                    logger.warning(f"Session validation failed for user {user_id}")
+            except Exception as e:
+                logger.error(f"Session validation error for user {user_id}: {e}")
+                session_valid = False
+            
+            if not session_valid:
                 logger.warning(f"Existing session is invalid for user {user_id}, attempting recovery...")
                 
                 # Try to recover the session
