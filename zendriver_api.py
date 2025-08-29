@@ -1085,8 +1085,9 @@ def google_flow_automation():
             asyncio.set_event_loop(loop)
             try:
                 loop.run_until_complete(process_zendriver_job(data))
-            finally:
-                loop.close()
+            except Exception as e:
+                logger.error(f"Async job error: {e}")
+            # Don't close the loop to keep browser sessions alive
         
         # Start job in separate thread
         thread = threading.Thread(target=run_async_job)
@@ -1137,8 +1138,9 @@ def zendriver_automation():
             asyncio.set_event_loop(loop)
             try:
                 loop.run_until_complete(process_zendriver_job(data))
-            finally:
-                loop.close()
+            except Exception as e:
+                logger.error(f"Async job error: {e}")
+            # Don't close the loop to keep browser sessions alive
         
         # Start job in separate thread
         thread = threading.Thread(target=run_async_job)
