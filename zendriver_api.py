@@ -324,15 +324,22 @@ class ZendriverSession:
             
             # Try to execute a simple command to check if browser is responsive
             try:
-                await self.page.evaluate("document.title")
+                # Add timeout to prevent hanging
+                await asyncio.wait_for(self.page.evaluate("document.title"), timeout=5.0)
                 self.logger.info("Browser is responsive")
+            except asyncio.TimeoutError:
+                self.logger.warning("Browser responsiveness check timed out")
+                return False
             except Exception as e:
                 self.logger.warning(f"Browser is not responsive: {e}")
                 return False
             
             # Check if we're still logged in by checking current URL
             try:
-                current_url = await self.page.evaluate("window.location.href")
+                current_url = await asyncio.wait_for(
+                    self.page.evaluate("window.location.href"), 
+                    timeout=5.0
+                )
                 self.logger.info(f"Current URL: {current_url}")
                 
                 # If redirected to login page, session expired
@@ -340,6 +347,9 @@ class ZendriverSession:
                     self.logger.warning("Redirected to login page - session expired")
                     return False
                     
+            except asyncio.TimeoutError:
+                self.logger.warning("URL check timed out")
+                return False
             except Exception as e:
                 self.logger.warning(f"URL check failed: {e}")
                 return False
