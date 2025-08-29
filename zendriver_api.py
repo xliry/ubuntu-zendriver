@@ -50,8 +50,12 @@ user_projects = {}
 SESSION_TIMEOUT = 30 * 60  # 30 minutes
 MAX_SESSIONS = 100  # Maximum number of concurrent sessions
 
-# Shared Chrome profile for persistent cookies
-SHARED_PROFILE_DIR = "./shared_chrome_profile"
+# Shared Chrome profile for persistent cookies (cross-platform path)
+import platform
+if platform.system() == "Windows":
+    SHARED_PROFILE_DIR = os.path.join(os.path.expanduser("~"), "zendriver_profile")
+else:
+    SHARED_PROFILE_DIR = "./shared_chrome_profile"
 
 class ZendriverSession:
     """Zendriver session management class - Google Flow automation"""
