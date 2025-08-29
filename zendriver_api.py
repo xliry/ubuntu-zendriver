@@ -263,6 +263,21 @@ class ZendriverSession:
             if "myaccount.google.com" in current_url or "gmail.com" in current_url:
                 logger.info("Login successful!")
                 return True
+            elif "accounts.google.com" in current_url:
+                # Still on login page, might need to wait more
+                logger.info("Still on login page, waiting...")
+                await asyncio.sleep(5)
+                try:
+                    current_url = await self.page.evaluate("window.location.href")
+                except:
+                    current_url = self.page.url
+                
+                if "myaccount.google.com" in current_url or "gmail.com" in current_url:
+                    logger.info("Login successful after waiting!")
+                    return True
+                else:
+                    logger.warning(f"Login status unclear after waiting: {current_url}")
+                    return False
             else:
                 logger.warning(f"Login status unclear: {current_url}")
                 return False
@@ -739,7 +754,6 @@ def retry_on_failure(max_retries=3, delay=2):
         return wrapper
     return decorator
 
-@retry_on_failure(max_retries=3)
 async def process_zendriver_job(job_data):
     """Process Zendriver job - Google Flow automation"""
     job_id = job_data['jobId']
@@ -783,25 +797,25 @@ async def process_zendriver_job(job_data):
         # Check if user has an existing project
         if user_id in user_projects:
             project_id = user_projects[user_id]
-            self.logger.info(f"User {user_id} has existing project: {project_id}")
+            logger.info(f"User {user_id} has existing project: {project_id}")
             
             # Navigate to existing project
             if not await session.navigate_to_existing_project(project_id):
-                self.logger.warning(f"Failed to navigate to existing project {project_id}, creating new project")
+                logger.warning(f"Failed to navigate to existing project {project_id}, creating new project")
                 # If navigation fails, create new project
                 project_id = await session.create_new_project()
                 if not project_id:
                     raise Exception("Failed to create new project")
                 user_projects[user_id] = project_id
-                self.logger.info(f"Created new project for user {user_id}: {project_id}")
+                logger.info(f"Created new project for user {user_id}: {project_id}")
         else:
             # Create new project for first time user
-            self.logger.info(f"Creating new project for user {user_id}")
+            logger.info(f"Creating new project for user {user_id}")
             project_id = await session.create_new_project()
             if not project_id:
                 raise Exception("Failed to create new project")
             user_projects[user_id] = project_id
-            self.logger.info(f"Created new project for user {user_id}: {project_id}")
+            logger.info(f"Created new project for user {user_id}: {project_id}")
         
         # Create video from text
         if not await session.create_video_from_text(prompt):
