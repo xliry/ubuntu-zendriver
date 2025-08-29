@@ -154,9 +154,19 @@ class ZendriverSession:
         try:
             self.logger.info("Starting login process...")
             
+            # Ensure we're on the login page
+            await self.page.get("https://accounts.google.com/signin")
+            await asyncio.sleep(3)
+            
             # Apply stealth scripts
             await self.apply_stealth_scripts()
             await asyncio.sleep(3)
+            
+            # Log current page state for debugging
+            current_url = await self.page.evaluate("window.location.href")
+            page_title = await self.page.evaluate("document.title")
+            self.logger.info(f"Login page URL: {current_url}")
+            self.logger.info(f"Login page title: {page_title}")
             
             # Find and fill email field
             email_selectors = [
