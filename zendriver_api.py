@@ -50,6 +50,9 @@ user_projects = {}
 SESSION_TIMEOUT = 30 * 60  # 30 minutes
 MAX_SESSIONS = 100  # Maximum number of concurrent sessions
 
+# Shared Chrome profile for persistent cookies
+SHARED_PROFILE_DIR = "./shared_chrome_profile"
+
 class ZendriverSession:
     """Zendriver session management class - Google Flow automation"""
     
@@ -67,11 +70,14 @@ class ZendriverSession:
         try:
             self.logger.info(f"Creating Zendriver session for job {self.job_id}")
             
-            # Chrome options for guest mode
+            # Ensure shared profile directory exists
+            os.makedirs(SHARED_PROFILE_DIR, exist_ok=True)
+            
+            # Chrome options with persistent profile (no guest mode)
             chrome_args = [
-                "--guest",
+                f"--user-data-dir={SHARED_PROFILE_DIR}",
                 "--no-first-run",
-                "--no-service-autorun",
+                "--no-service-autorun", 
                 "--no-default-browser-check",
                 "--homepage=about:blank",
                 "--no-pings",
@@ -85,7 +91,8 @@ class ZendriverSession:
                 "--disable-dev-shm-usage",
                 "--disable-features=IsolateOrigins,DisableLoadExtensionCommandLineSwitch,site-per-process",
                 "--disable-session-crashed-bubble",
-                "--disable-search-engine-choice-screen"
+                "--disable-search-engine-choice-screen",
+                "--disable-features=ProfilePicker"  # Skip profile picker
             ]
             
             self.browser = await zd.start(arguments=chrome_args)
@@ -362,9 +369,9 @@ class ZendriverSession:
             return False
 
     async def is_logged_in(self):
-        """Check if user is still logged in to Google"""
+        """Check if user is still logged in to Google via cookies"""
         try:
-            self.logger.info("Checking login status...")
+            self.logger.info("Checking login status via cookies...")
             await self.page.get("https://myaccount.google.com")
             await asyncio.sleep(3)
             
@@ -372,7 +379,7 @@ class ZendriverSession:
             is_logged_in = "myaccount.google.com" in current_url
             
             if is_logged_in:
-                self.logger.info("User is still logged in")
+                self.logger.info("User is logged in via saved cookies!")
             else:
                 self.logger.warning(f"User not logged in, current URL: {current_url}")
                 
@@ -380,6 +387,24 @@ class ZendriverSession:
             
         except Exception as e:
             self.logger.error(f"Login check failed: {e}")
+            return False
+
+    async def smart_login(self, email, password):
+        """Smart login - check cookies first, then login if needed"""
+        try:
+            self.logger.info("Starting smart login process...")
+            
+            # First check if already logged in via cookies
+            if await self.is_logged_in():
+                self.logger.info("Already logged in via cookies - skipping login!")
+                return True
+            
+            # Not logged in, proceed with normal login
+            self.logger.info("Not logged in, proceeding with credential login...")
+            return await self.login_with_credentials(email, password)
+            
+        except Exception as e:
+            self.logger.error(f"Smart login failed: {e}")
             return False
 
     async def recover_session(self):
@@ -1019,8 +1044,8 @@ async def process_zendriver_job(job_data):
         if not email or not password:
             raise Exception("Invalid credentials")
         
-        # Login
-        if not await session.login_with_credentials(email, password):
+        # Smart login (check cookies first)
+        if not await session.smart_login(email, password):
             raise Exception("Login failed")
         
         # Check if user has an existing project
